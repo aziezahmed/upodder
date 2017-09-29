@@ -23,7 +23,9 @@ except NameError: pass
 # TODO expanduser as action? https://gist.github.com/brantfaircloth/1252339
 parser = argparse.ArgumentParser(description='Download podcasts via the command line.')
 parser.add_argument('--no-download', action='store_true',
-                   help="Don't download any files. Just mark as read.")
+    help="Don't download any files. Just mark as read.")
+parser.add_argument('--no-confirm', action='store_true',
+    help="Don't ask me for confirmation before downloading an episodees. Just download it.")
 parser.add_argument('--podcastdir', '-p', default='~/Downloads/podcasts', 
     help="Folder to download podcast files to.")
 parser.add_argument('--basedir', '-b', default='~/.upodder', 
@@ -32,10 +34,12 @@ parser.add_argument('--oldness', '-o', default=30, type=int,
     help="Skip entries older than X days.")
 parser.add_argument('--mark-seen', action='store_true',
     help="Just mark all entries as seen and exit.")
-parser.add_argument('--import-opml', '-i', dest='opmlpath',
+parser.add_argument('--import-opml', '-i', dest='opmlpath', 
     help='Import feeds from an OPML file.')
-parser.add_argument("--quiet", help="Only output errors.",
-                    action="store_true")
+parser.add_argument('--episode', '-e', dest='episodeTitle', default="untitled",
+    help='Force upodder to download an episode even if it is already seen by specifying the title')
+parser.add_argument("--quiet", 
+    help="Only output errors.", action="store_true")
 args = parser.parse_args()
 
 YES = [1,"1","on","yes","Yes","YES","y","Y","true","True","TRUE","t","T"]
@@ -76,20 +80,21 @@ class EntryProcessor(object):
         self.hashed = hashlib.sha1(entry['title'].encode('ascii', 'ignore')).hexdigest()
         self.pub_date = dt.fromtimestamp(time.mktime(entry.published_parsed))
 
-        if args.mark_seen:
-            SeenEntry(pub_date=self.pub_date, hashed=self.hashed)
-            l.debug("Marking as seen: %s"%(entry['title']))
-            return
+        if args.episodeTitle != entry["title"]:
+            if args.mark_seen:
+                SeenEntry(pub_date=self.pub_date, hashed=self.hashed)
+                l.debug("Marking as seen: %s"%(entry['title']))
+                return
 
-        # Let's check if we worked on this entry earlier...
-        if SeenEntry.select(SeenEntry.q.hashed == self.hashed).count() > 0:
-            l.debug("Already seen: %s"%(entry['title']))
-            return
-        
-        # Let's check the entry's date
-        if (dt.now() - self.pub_date).days > args.oldness:
-            l.debug("Too old for us: %s"%entry['title'])
-            return
+            # Let's check if we worked on this entry earlier...
+            if SeenEntry.select(SeenEntry.q.hashed == self.hashed).count() > 0:
+                l.debug("Already seen: %s"%(entry['title']))
+                return
+            
+            # Let's check the entry's date
+            if (dt.now() - self.pub_date).days > args.oldness:
+                l.debug("Too old for us: %s"%entry['title'])
+                return
 
         # Search for mpeg enclosures
         for enclosure in filter(lambda x: x.get('type') in FILE_TYPES.keys() ,entry.get('enclosures',[])):
@@ -115,6 +120,11 @@ class EntryProcessor(object):
             """Downloads URL to file, returns file name of download (from URL or Content-Disposition)"""
             if not os.path.exists(os.path.dirname(downloadto)):
                 os.makedirs(os.path.dirname(downloadto))
+
+            if not args.no_confirm:
+                user_wish_to_download = input("Would you like to download " + entry['title'] +"? (y/n) or quit? (Ctrl+c): ")
+                if user_wish_to_download not in YES:
+                    return True
 
             l.debug("Downloading %s from %s" % (entry['title'], enclosure['href']))
             r = requests.get(enclosure['href'], stream=True, timeout=25)
