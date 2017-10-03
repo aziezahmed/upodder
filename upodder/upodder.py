@@ -34,6 +34,8 @@ parser.add_argument('--mark-seen', action='store_true',
     help="Just mark all entries as seen and exit.")
 parser.add_argument('--import-opml', '-i', dest='opmlpath',
     help='Import feeds from an OPML file.')
+parser.add_argument('--episode', '-e', dest='episodeTitle', default="untitled",
+    help='Download an episode by specifying the title, even if it already seen')
 parser.add_argument("--quiet", help="Only output errors.",
                     action="store_true")
 args = parser.parse_args()
@@ -75,21 +77,22 @@ class EntryProcessor(object):
     def __init__(self, entry, feed):
         self.hashed = hashlib.sha1(entry['title'].encode('ascii', 'ignore')).hexdigest()
         self.pub_date = dt.fromtimestamp(time.mktime(entry.published_parsed))
-
-        if args.mark_seen:
-            SeenEntry(pub_date=self.pub_date, hashed=self.hashed)
-            l.debug("Marking as seen: %s"%(entry['title']))
-            return
-
-        # Let's check if we worked on this entry earlier...
-        if SeenEntry.select(SeenEntry.q.hashed == self.hashed).count() > 0:
-            l.debug("Already seen: %s"%(entry['title']))
-            return
         
-        # Let's check the entry's date
-        if (dt.now() - self.pub_date).days > args.oldness:
-            l.debug("Too old for us: %s"%entry['title'])
-            return
+        if args.episodeTitle != entry["title"]:
+            if args.mark_seen:
+                SeenEntry(pub_date=self.pub_date, hashed=self.hashed)
+                l.debug("Marking as seen: %s"%(entry['title']))
+                return
+
+            # Let's check if we worked on this entry earlier...
+            if SeenEntry.select(SeenEntry.q.hashed == self.hashed).count() > 0:
+                l.debug("Already seen: %s"%(entry['title']))
+                return
+        
+            # Let's check the entry's date
+            if (dt.now() - self.pub_date).days > args.oldness:
+                l.debug("Too old for us: %s"%entry['title'])
+                return
 
         # Search for mpeg enclosures
         for enclosure in filter(lambda x: x.get('type') in FILE_TYPES.keys() ,entry.get('enclosures',[])):
